@@ -34,7 +34,10 @@ provided by Nuand. The modifications were done as described in the [libbladeRF A
 * CAD
   * Fusion 360
   * STEP
-* [Report](https://github.com/JoseAmador95/UoS_Beamforming/blob/master/Report.pdf) <----- Great Reference 
+* [Report](https://github.com/JoseAmador95/UoS_Beamforming/blob/master/Report.pdf) <----- Great Reference
+
+## Requirements
+The MIMO objects require an older version of the BladeRF release. The recommended version is [2019.07](https://github.com/Nuand/bladeRF/releases/tag/2019.07). Particularly, 2021.02 is incompatible. Please let me know if a workaround is found for the newer version.
 
 ## How to Use
 These scripts require the official tools from [Nuand](https://www.nuand.com/support/); include the root directory into
