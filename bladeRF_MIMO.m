@@ -137,14 +137,15 @@ classdef bladeRF_MIMO < handle
             end
         end
 
-        function [major, minor, patch] = version()
+        function [major, minor, patch, version_string] = version()
         % Get the version of this MATLAB libbladeRF wrapper.
         %
-        % [major, minor, patch] = bladeRF.version()
+        % [major, minor, patch, version_string] = bladeRF.version()
         %
-            major = 0;
-            minor = 1;
-            patch = 2;
+            major = 2;
+            minor = 4;
+            patch = 0;
+            version_string = char(sprintf("%d.%d.%d", major, minor, patch));
         end
 
         function [major, minor, patch, version_string] = library_version()
@@ -220,11 +221,45 @@ classdef bladeRF_MIMO < handle
                 case 'silent'
                     enum_val = 'BLADERF_LOG_LEVEL_SILENT';
                 otherwise
-                    error('Invalid log level');
+                    error(strcat('Invalid log level: ', level));
             end
 
             bladeRF_MIMO.load_library();
             calllib('libbladeRF', 'bladerf_log_set_verbosity', enum_val);
+        end
+
+
+        function int32 = str2ch(str)
+        % Convert channel string to integer constant
+        %
+        % bladeRF.str2ch(channel_string)
+        %
+        % Options for chanel_string are:
+        %   'BLADERF_MODULE_RX'
+        %   'BLADERF_CHANNEL_RX1'
+        %   'BLADERF_CHANNEL_RX2'
+        %   'BLADERF_MODULE_TX'
+        %   'BLADERF_CHANNEL_TX1'
+        %   'BLADERF_CHANNEL_TX2'
+        %
+            str = upper(str);
+
+            switch str
+                case 'BLADERF_MODULE_RX'
+                    int32 = 0;
+                case 'BLADERF_CHANNEL_RX1'
+                    int32 = 0;
+                case 'BLADERF_CHANNEL_RX2'
+                    int32 = 2;
+                case 'BLADERF_MODULE_TX'
+                    int32 = 1;
+                case 'BLADERF_CHANNEL_TX1'
+                    int32 = 1;
+                case 'BLADERF_CHANNEL_TX2'
+                    int32 = 3;
+                otherwise
+                    error('Invalid channel string: "%s"', str);
+            end
         end
 
         function build_thunk
@@ -250,8 +285,8 @@ classdef bladeRF_MIMO < handle
         %   - libusb-1.0.dll and/or CyUSB.dll
         %   - pthreadVC2.dll
         %
-        % Linux users will need to copy libbladeRF.h to this directory
-        % and add the following to it, after "#define BLADERF_H_"
+        % Linux users will need to copy libbladeRF.h, bladeRF1.h, bladeRF2.h to this directory
+        % and add the following #define to libbladeRF.h, after "#define BLADERF_H_" or "#define LIBBLADERF_H"
         %
         % #define MATLAB_LINUX_THUNK_BUILD_
         %
@@ -262,13 +297,34 @@ classdef bladeRF_MIMO < handle
             arch = computer('arch');
             this_dir = pwd;
             proto_output = 'delete_this_file';
+            if size(dir('*bladeRF*.h'), 1) < 3
+                help bladeRF.build_thunk
+                warning('Ensure libbladeRF.h, bladeRF1.h, and bladeRF2.h exist in this directory. Please review instructions.')
+                return
+            end
             switch arch
                 case 'win64'
                     [notfound, warnings] = loadlibrary('bladeRF', 'libbladeRF.h', 'includepath', this_dir, 'addheader', 'stdbool.h', 'addheader', 'bladeRF1.h', 'addheader', 'bladeRF2.h', 'alias', 'libbladeRF', 'notempdir', 'mfilename', proto_output);
                 case 'glnxa64'
-                    [notfound, warnings] = loadlibrary('libbladeRF', 'libbladeRF.h', 'includepath', this_dir, 'notempdir', 'mfilename', proto_output);
+                    hnd = fopen('libbladeRF.h');
+                    found = false;
+                    if hnd > 0
+                        while ~ feof(hnd)
+                            if strfind(fgetl(hnd), '#define MATLAB_LINUX_THUNK_BUILD_') == 1
+                                found = true;
+                                break;
+                            end
+                        end
+                        fclose(hnd);
+                    end
+                    if ~ found
+                        help bladeRF.build_thunk
+                        warning('Could not find required #define in libbladeRF.h . Please review instructions.');
+                        return
+                    end
+                    [notfound, warnings] = loadlibrary('libbladeRF', 'libbladeRF.h', 'includepath', this_dir, 'addheader', 'stdbool.h', 'addheader', 'bladeRF1.h', 'addheader', 'bladeRF2.h', 'alias', 'libbladeRF', 'notempdir', 'mfilename', proto_output);
                 case 'maci64'
-                    [notfound, warnings] = loadlibrary('libbladeRF.dylib', 'libbladeRF.h', 'includepath', this_dir, 'notempdir', 'mfilename', proto_output);
+                    [notfound, warnings] = loadlibrary('libbladeRF.dylib', 'libbladeRF.h', 'includepath', this_dir, 'addheader', 'stdbool.h', 'addheader', 'bladeRF1.h', 'addheader', 'bladeRF2.h', 'alias', 'libbladeRF', 'notempdir', 'mfilename', proto_output);
                 otherwise
                     error(strcat('Unsupported architecture: ', arch))
             end
@@ -286,6 +342,13 @@ classdef bladeRF_MIMO < handle
 
             if isempty(warnings) == false
                 warning('Encountered the following warnings while loading libbladeRF:\n%s\n', warnings);
+            end
+
+            warning('Restart program after running bladeRF.build_thunk()')
+            if isempty(strfind([path],pwd))
+                warning('Could not find current directory in path.')
+                warning('Consider saving this directory to path by trying:')
+                warning('    addpath(pwd) ; savepath')
             end
         end
     end
@@ -428,7 +491,8 @@ classdef bladeRF_MIMO < handle
             %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
             [obj.versions.matlab.major, ...
              obj.versions.matlab.minor, ...
-             obj.versions.matlab.patch] = bladeRF_MIMO.version();
+             obj.versions.matlab.patch, ...
+             obj.versions.matlab.string ] = bladeRF_MIMO.version();
 
             [obj.versions.libbladeRF.major, ...
              obj.versions.libbladeRF.minor, ...
@@ -439,13 +503,19 @@ classdef bladeRF_MIMO < handle
             [~, ver_ptr] = bladeRF_MIMO.empty_version();
             status = calllib('libbladeRF', 'bladerf_fw_version', dptr, ver_ptr);
             bladeRF_MIMO.check_status('bladerf_fw_version', status);
-            obj.versions.firmware = ver_ptr.value;
+            obj.versions.firmware.major  = ver_ptr.value.major;
+            obj.versions.firmware.minor  = ver_ptr.value.minor;
+            obj.versions.firmware.patch  = ver_ptr.value.patch;
+            obj.versions.firmware.string = ver_ptr.value.describe;
 
             % FPGA version
             [~, ver_ptr] = bladeRF_MIMO.empty_version();
             status = calllib('libbladeRF', 'bladerf_fpga_version', dptr, ver_ptr);
             bladeRF_MIMO.check_status('bladerf_fpga_version', status);
-            obj.versions.fpga = ver_ptr.value;
+            obj.versions.fpga.major  = ver_ptr.value.major;
+            obj.versions.fpga.minor  = ver_ptr.value.minor;
+            obj.versions.fpga.patch  = ver_ptr.value.patch;
+            obj.versions.fpga.string = ver_ptr.value.describe;
 
             %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
             % Populate information
@@ -482,6 +552,9 @@ classdef bladeRF_MIMO < handle
                     obj.info.gen = 1;
                 case 'BLADERF_FPGA_A4'
                     obj.info.fpga_size = 'A4 49 kLE';
+                    obj.info.gen = 2;
+                case 'BLADERF_FPGA_A5'
+                    obj.info.fpga_size = 'A5 77 kLE';
                     obj.info.gen = 2;
                 case 'BLADERF_FPGA_A9'
                     obj.info.fpga_size = 'A9 301 kLE';
@@ -864,7 +937,7 @@ classdef bladeRF_MIMO < handle
                 case 'RF_LNA1'
                 case 'RF_LNA2'
                 case 'RF_LNA3'
-
+                case 'RFIC_BIST'
                 otherwise
                     error(['Invalid loopback mode: ' mode]);
             end
@@ -902,10 +975,10 @@ classdef bladeRF_MIMO < handle
 
             if nargin < 2
                 module = 'ALL';
-            else
-                module = strcat('BLADERF_DC_CAL_', upper(module));
             end
 
+            module = strcat('BLADERF_DC_CAL_', upper(module));
+            
             switch module
                 case { 'BLADERF_DC_CAL_LPF_TUNING', ...
                        'BLADERF_DC_CAL_RX_LPF',     ...
@@ -936,7 +1009,11 @@ classdef bladeRF_MIMO < handle
                 config_backup      = obj.tx.config;
                 loopback_backup    = obj.loopback;
 
-                obj.loopback = 'BB_TXVGA1_RXVGA2';
+                if obj.info.gen==1
+                    obj.loopback = 'BB_TXVGA1_RXVGA2';
+                else
+                    obj.loopback = 'FIRMWARE'
+                end
 
                 obj.tx.config.num_buffers   = 16;
                 obj.tx.config.num_transfers = 8;

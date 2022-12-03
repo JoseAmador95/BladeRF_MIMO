@@ -46,7 +46,6 @@ classdef bladeRF_MIMO_XCVR < handle
         lna             % RX LNA gain. Values: { 'BYPASS', 'MID', 'MAX' }
         xb200_filter    % XB200 Filter selection. Only valid when an XB200 is attached. Options are: '50M', '144M', '222M', 'AUTO_1DB', 'AUTO_3DB', 'CUSTOM'
         mux             % FPGA sample FIFO mux mode. Only valid for RX, with options 'BASEBAND_LMS', '12BIT_COUNTER', '32BIT_COUNTER', 'DIGITAL_LOOPBACK'
-        channel         % Channel number
     end
 
     properties(SetAccess = immutable, Hidden=true)
@@ -61,7 +60,7 @@ classdef bladeRF_MIMO_XCVR < handle
     end
 
     properties(SetAccess = private, Hidden=true)
-        current_channel % Current active channel
+        channels        % Channels given the current active module
     end
 
     properties(SetAccess = private)
@@ -88,13 +87,13 @@ classdef bladeRF_MIMO_XCVR < handle
             [rate.num, rate.den] = rat(mod(val,1));
 
             % Set the samplerate
-            for i = 1:2
-                [status, ~, ~, actual] = calllib('libbladeRF', 'bladerf_set_rational_sample_rate', obj.bladerf.device, obj.module{i}, rate, rate);
+            for ch = obj.channels
+                [status, ~, ~, actual] = calllib('libbladeRF', 'bladerf_set_rational_sample_rate', obj.bladerf.device, bladeRF.str2ch(ch), rate, rate);
                 bladeRF.check_status('bladerf_set_rational_sample_rate', status);
 
                 fprintf('Set %s%d samplerate. Requested: %d + %d/%d, Actual: %d + %d/%d\n', ...
                         obj.direction, ...
-                        i, ...
+                        ch, ...
                         rate.integer, rate.num, rate.den, ...
                         actual.integer, actual.num, actual.den);
             end
@@ -107,7 +106,7 @@ classdef bladeRF_MIMO_XCVR < handle
             rate.den = 1;
 
             % Get the sample rate from the hardware
-            [status, ~, rate] = calllib('libbladeRF', 'bladerf_get_rational_sample_rate', obj.bladerf.device, obj.module{1}, rate);
+            [status, ~, rate] = calllib('libbladeRF', 'bladerf_get_rational_sample_rate', obj.bladerf.device, bladeRF.str2ch(obj.channels(1)), rate);
             bladeRF.check_status('bladerf_get_rational_sample_rate', status);
 
             %fprintf('Read %s samplerate: %d + %d/%d\n', ...
@@ -118,7 +117,7 @@ classdef bladeRF_MIMO_XCVR < handle
 
         % Frequency
         function set.frequency(obj, val)
-            [status, ~] = calllib('libbladeRF', 'bladerf_set_frequency', obj.bladerf.device, obj.module{1}, val);
+            [status, ~] = calllib('libbladeRF', 'bladerf_set_frequency', obj.bladerf.device, bladeRF.str2ch(obj.channels(1)), val);
             bladeRF.check_status('bladerf_set_frequency', status);
             actual = obj.frequency;
             fprintf('Set %s frequency. Requested: %d, Actual: %d\n', ...
@@ -127,7 +126,7 @@ classdef bladeRF_MIMO_XCVR < handle
 
         function freq_val = get.frequency(obj)
             freq_val = uint32(0);
-            [status, ~, freq_val] = calllib('libbladeRF', 'bladerf_get_frequency', obj.bladerf.device, obj.module{1}, freq_val);
+            [status, ~, freq_val] = calllib('libbladeRF', 'bladerf_get_frequency', obj.bladerf.device, bladeRF.str2ch(obj.channels(1)), freq_val);
             bladeRF.check_status('bladerf_get_frequency', status);
 
             %fprintf('Read %s frequency: %f\n', obj.direction, freq_val);
@@ -135,20 +134,20 @@ classdef bladeRF_MIMO_XCVR < handle
 
         % Configures the LPF bandwidth on the associated module
         function set.bandwidth(obj, val)
-            for i = 1:2
+            for ch = obj.channels
                 actual = uint32(0);
-                [status, ~, actual] = calllib('libbladeRF', 'bladerf_set_bandwidth', obj.bladerf.device, obj.module{i}, val, actual);
+                [status, ~, actual] = calllib('libbladeRF', 'bladerf_set_bandwidth', obj.bladerf.device, bladeRF.str2ch(ch), val, actual);
                 bladeRF.check_status('bladerf_set_bandwidth', status);
           
-            fprintf('Set %s%d bandwidth. Requested: %f, Actual: %f\n', ...
-                    obj.direction, i, val, actual)
+                fprintf('Set %s%d bandwidth. Requested: %f, Actual: %f\n', ...
+                    obj.direction, ch, val, actual)
             end
         end
 
         % Reads the LPF bandwidth configuration on the associated module
         function bw_val = get.bandwidth(obj)
             bw_val = uint32(0);
-            [status, ~, bw_val] = calllib('libbladeRF', 'bladerf_get_bandwidth', obj.bladerf.device, obj.module{1}, bw_val);
+            [status, ~, bw_val] = calllib('libbladeRF', 'bladerf_get_bandwidth', obj.bladerf.device, bladeRF.str2ch(obj.channels(1)), bw_val);
             bladeRF.check_status('bladerf_get_bandwidth', status);
 
             %fprintf('Read %s bandwidth: %f\n', obj.direction, bw_val);
@@ -161,7 +160,6 @@ classdef bladeRF_MIMO_XCVR < handle
             else
                 ch = 'BLADERF_CHANNEL_TX1';
             end
-            ch = obj.channel;
             
             switch lower(val)
                 case 'auto'
@@ -179,8 +177,8 @@ classdef bladeRF_MIMO_XCVR < handle
                 otherwise
                     error(strcat('Invalid AGC setting: ', val));
             end
-            for i = 1:2
-                [status, ~] = calllib('libbladeRF', 'bladerf_set_gain_mode', obj.bladerf.device, ch{i}, agc_val);
+            for ch = obj.channels
+                [status, ~] = calllib('libbladeRF', 'bladerf_set_gain_mode', obj.bladerf.device, bladeRF.str2ch(ch), agc_val);
                 if status == -8
                     if obj.bladerf.info.gen == 1
                         disp('Cannot enable AGC. AGC DC LUT file is missing, run `cal table agc rx'' in bladeRF-cli.')
@@ -196,15 +194,7 @@ classdef bladeRF_MIMO_XCVR < handle
         % Reads the current automatic gain control setting
         function val = get.agc(obj)
             val = int32(0);
-            if strcmpi(obj.direction,'RX') == true
-                ch = 'BLADERF_CHANNEL_RX1';
-            else
-                ch = 'BLADERF_CHANNEL_TX1';
-            end
-            ch = obj.channel;
-
-            tmp = int32(0);
-            [status, ~, mode] = calllib('libbladeRF', 'bladerf_get_gain_mode', obj.bladerf.device, ch{1}, tmp);
+            [status, ~, mode] = calllib('libbladeRF', 'bladerf_get_gain_mode', obj.bladerf.device, bladeRF.str2ch(obj.channels(1)), tmp);
             bladeRF.check_status('bladerf_get_gain_mode', status);
 
             switch mode
@@ -225,65 +215,63 @@ classdef bladeRF_MIMO_XCVR < handle
         end
 
         % Configures active channel setting
-        function set.channel(obj, val)
-            if (strcmpi(val,'RX') == true || strcmpi(val, 'RX1') || strcmp(val, 'BLADERF_CHANNEL_RX1'))
-                channel = {'BLADERF_CHANNEL_RX1', 'BLADERF_CHANNEL_RX2'};
-%             elseif (strcmpi(val, 'RX2') || strcmp(val, 'BLADERF_CHANNEL_RX2'))
-%                 channel = 'BLADERF_CHANNEL_RX2';
-            elseif (strcmpi(val,'TX') == true || strcmpi(val, 'TX1') || strcmp(val, 'BLADERF_CHANNEL_TX1'))
-                channel = {'BLADERF_CHANNEL_TX1', 'BLADERF_CHANNEL_TX2'};
-%             elseif (strcmpi(val, 'TX2') || strcmp(val, 'BLADERF_CHANNEL_TX2'))
-%                 channel = 'BLADERF_CHANNEL_TX2';
+        function set.module(obj, val)
+            if (strcmpi(val,'RX') == true)
+                channels = ['BLADERF_CHANNEL_RX1', 'BLADERF_CHANNEL_RX2'];
+            elseif (strcmpi(val,'TX') == true)
+                channels = ['BLADERF_CHANNEL_TX1', 'BLADERF_CHANNEL_TX2'];
             end
 
-            obj.current_channel = channel;
+            obj.channels = channels;
 
-%             if obj.running
-%                 [status, ~] = calllib('libbladeRF', 'bladerf_enable_module', ...
-%                                       obj.bladerf.device, ...
-%                                       obj.current_channel, ...
-%                                       false);
-% 
-%                 bladeRF.check_status('bladerf_enable_module', status);
-% 
-% 
-%                 [status, ~] = calllib('libbladeRF', 'bladerf_enable_module', ...
-%                                       obj.bladerf.device, ...
-%                                       channel, ...
-%                                       true);
-% 
-%                 bladeRF.check_status('bladerf_enable_module', status);
-%             end
+            if obj.running
+            for ch = obj.channels
+                [status, ~] = calllib('libbladeRF', 'bladerf_enable_module', ...
+                                      obj.bladerf.device, ...
+                                      bladeRF.str2ch(ch), ...
+                                      false);
+
+                bladeRF.check_status('bladerf_enable_module', status);
+
+
+                [status, ~] = calllib('libbladeRF', 'bladerf_enable_module', ...
+                                      obj.bladerf.device, ...
+                                      bladeRF.str2ch(ch), ...
+                                      true);
+
+                bladeRF.check_status('bladerf_enable_module', status);
+            end
+            end
 
         end
 
+        % Reads the current active module setting
+        function val = get.module(obj)    
+            val = obj.module
+        end
+
         % Reads the current active channel setting
-        function val = get.channel(obj)
-            val = obj.current_channel;
+        function val = get.channels(obj)
+            val = obj.channels;
         end
 
         % Configures the universal gain
         function set.gain(obj, val)
             % TODO: Check Gain assigment. Only the first value is being
             % writen
-            assert(length(val) == 2, "Input must be a 2 element array. i.e. [60, 40]")
+            assert(length(val) == 2, "Input must be a 2 element array. e.g., [60, 40]")
                 
             if strcmpi(obj.direction,'RX') == true && strcmpi(obj.agc,'manual') == 0
                 warning(['Cannot set ' obj.direction ' gain when AGC is in ' obj.agc ' mode'])
             end
 
-%             if strcmpi(obj.direction,'RX') == true
-%                 ch = 'BLADERF_CHANNEL_RX1';
-%             else
-%                 ch = 'BLADERF_CHANNEL_TX1';
-%             end
-            for i = 1:2
-                [status, ~] = calllib('libbladeRF', 'bladerf_set_gain', obj.bladerf.device, obj.channel{i}, val(i));
+            for ch = obj.channels
+                [status, ~] = calllib('libbladeRF', 'bladerf_set_gain', obj.bladerf.device, bladeRF.str2ch(ch), val(ch));
                 bladeRF.check_status('bladerf_set_gain', status);
             end
             
             fprintf('Set %s%d bandwidth. Requested: [%d, %d], Actual: [%d, %d]\n', ...
-                    obj.direction, i, val, obj.gain)
+                    obj.direction, ch, val, obj.gain)
         end
 
         % Reads the current universal gain configuration
@@ -294,14 +282,13 @@ classdef bladeRF_MIMO_XCVR < handle
             else
                 ch = 'BLADERF_CHANNEL_TX1';
             end
-            ch = obj.channel;
 
             tmp = int32(0);
             vals = zeros(1,2);
-            for i = 1:2
-                [status, ~, val] = calllib('libbladeRF', 'bladerf_get_gain', obj.bladerf.device, ch{i}, tmp);
+            for ch = obj.channels
+                [status, ~, val] = calllib('libbladeRF', 'bladerf_get_gain', obj.bladerf.device, bladeRF.str2ch(ch), tmp);
                 bladeRF.check_status('bladerf_get_gain', status);
-                vals(i) = val;
+                vals = val;
             end
             %fprintf('Read %s gain: %d\n', obj.direction, val);
         end
@@ -449,7 +436,7 @@ classdef bladeRF_MIMO_XCVR < handle
                 ch = 'BLADERF_CHANNEL_TX1';
             end
 
-            [status, ~] = calllib('libbladeRF', 'bladerf_set_bias_tee', obj.bladerf.device, ch, val);
+            [status, ~] = calllib('libbladeRF', 'bladerf_set_bias_tee', obj.bladerf.device, bladeRF.str2ch(ch), val);
 
             %fprintf('Set %s biastee: %d\n', obj.direction, obj.vga2);
         end
@@ -462,7 +449,7 @@ classdef bladeRF_MIMO_XCVR < handle
                 ch = 'BLADERF_CHANNEL_TX1';
             end
             tmp = int32(0);
-            [status, ~, val] = calllib('libbladeRF', 'bladerf_get_bias_tee', obj.bladerf.device, ch, tmp);
+            [status, ~, val] = calllib('libbladeRF', 'bladerf_get_bias_tee', obj.bladerf.device, bladeRF.str2ch(ch), tmp);
 
             %fprintf('Get %s biastee: %d\n', obj.direction, val);
         end
@@ -471,13 +458,12 @@ classdef bladeRF_MIMO_XCVR < handle
         function val = get.timestamp(obj)
             val = uint64(0);
             actualDirection = '';
-            if strcmpi(obj.current_channel{1}, 'BLADERF_CHANNEL_TX1') == true || strcmpi(obj.current_channel{2}, 'BLADERF_CHANNEL_TX2') == true
+            if strcmpi(obj.module, 'TX') == true || strcmpi(obj.module, 'TX') == true
                 actualDirection = 'BLADERF_TX';
             else
                 actualDirection = 'BLADERF_RX';
             end
             [status, ~, val] = calllib('libbladeRF', 'bladerf_get_timestamp', obj.bladerf.device, actualDirection, val);             
-            %[status, ~, val] = calllib('libbladeRF', 'bladerf_get_timestamp', obj.bladerf.device, obj.module, val);
             bladeRF.check_status('bladerf_get_timestamp', status);
         end
 
@@ -500,8 +486,8 @@ classdef bladeRF_MIMO_XCVR < handle
             end
 
             filter_val = ['BLADERF_XB200_' filter ];
-            for i = 1:2
-                status = calllib('libbladeRF', 'bladerf_xb200_set_filterbank', obj.bladerf.device, obj.module{i}, filter_val);
+            for ch = obj.channels
+                status = calllib('libbladeRF', 'bladerf_xb200_set_filterbank', obj.bladerf.device, bladeRF.str2ch(ch), filter_val);
                 bladeRF.check_status('bladerf_xb200_set_filterbank', status);
             end
         end
@@ -514,7 +500,7 @@ classdef bladeRF_MIMO_XCVR < handle
             end
 
             filter_val = 0;
-            [status, ~, filter_val] = calllib('libbladeRF', 'bladerf_xb200_get_filterbank', obj.bladerf.device, obj.module{1}, filter_val);
+            [status, ~, filter_val] = calllib('libbladeRF', 'bladerf_xb200_get_filterbank', obj.bladerf.device, bladeRF.str2ch(obj.channels(1)), filter_val);
             bladeRF.check_status('bladerf_xb200_get_filterbank', status);
 
             filter_val = strrep(filter_val, 'BLADERF_XB200_', '');
@@ -562,8 +548,7 @@ classdef bladeRF_MIMO_XCVR < handle
             obj.direction = dir;
             obj.bladerf = dev;
 
-            obj.channel = dir;
-            obj.module = obj.current_channel;
+            obj.module = dir;
 
             if strcmpi(xb, 'XB200') == true
                 obj.min_frequency = 0;
@@ -583,21 +568,21 @@ classdef bladeRF_MIMO_XCVR < handle
 
             freqrange = libstruct('bladerf_range');
 
-            status = calllib('libbladeRF', 'bladerf_get_frequency_range', obj.bladerf.device, obj.module{1}, freqrange);
+            status = calllib('libbladeRF', 'bladerf_get_frequency_range', obj.bladerf.device, bladeRF.str2ch(obj.channels(1)), freqrange);
             bladeRF.check_status('bladerf_get_frequency_range', status);
             obj.min_frequency = freqrange.min;
             obj.max_frequency = freqrange.max;
 
             samplerange = libstruct('bladerf_range');
 
-            status = calllib('libbladeRF', 'bladerf_get_sample_rate_range', obj.bladerf.device, obj.module{1}, samplerange);
+            status = calllib('libbladeRF', 'bladerf_get_sample_rate_range', obj.bladerf.device, bladeRF.str2ch(obj.channels(1)), samplerange);
             bladeRF.check_status('bladerf_get_frequency_range', status);
             obj.min_sampling = samplerange.min;
             obj.max_sampling = samplerange.max;
 
             if strcmpi(dir,'RX') == true
-                for i = 1:2
-                    status = calllib('libbladeRF', 'bladerf_set_gain_mode', obj.bladerf.device, obj.module{i}, 'BLADERF_GAIN_DEFAULT');
+                for ch = ['BLADERF_CHANNEL_RX1', 'BLADERF_CHANNEL_RX2']
+                    status = calllib('libbladeRF', 'bladerf_set_gain_mode', obj.bladerf.device, bladeRF.str2ch(ch), 'BLADERF_GAIN_DEFAULT');
                     if status == -8
                         if obj.bladerf.info.gen == 1
                             disp('Cannot enable AGC. AGC DC LUT file is missing, run `cal table agc rx'' in bladeRF-cli.')
@@ -607,7 +592,7 @@ classdef bladeRF_MIMO_XCVR < handle
                     end
 
                     gainmode = int32(0);
-                    [status, ~, gainmode] = calllib('libbladeRF', 'bladerf_get_gain_mode', obj.bladerf.device, obj.module{i}, gainmode);
+                    [status, ~, gainmode] = calllib('libbladeRF', 'bladerf_get_gain_mode', obj.bladerf.device, bladeRF.str2ch(ch), gainmode);
                 end
             end
 
@@ -623,7 +608,7 @@ classdef bladeRF_MIMO_XCVR < handle
                 end
             end
 
-            obj.corrections = bladeRF_IQCorr(dev, obj.module{1}, 0, 0, 0, 0);
+            obj.corrections = bladeRF_IQCorr(dev, bladeRF.str2ch(obj.channels(1)), 0, 0, 0, 0);
             obj.running = false;
         end
 
@@ -662,10 +647,10 @@ classdef bladeRF_MIMO_XCVR < handle
             bladeRF.check_status('bladerf_sync_config', status);
 
             % Enable the module
-            for i = 1:2
+            for ch = obj.channels
                 [status, ~] = calllib('libbladeRF', 'bladerf_enable_module', ...
                                       obj.bladerf.device, ...
-                                      obj.current_channel{i}, ...
+                                      bladeRF.str2ch(ch), ...
                                       true);
 
                 bladeRF.check_status('bladerf_enable_module', status);
@@ -701,10 +686,10 @@ classdef bladeRF_MIMO_XCVR < handle
             end
 
             % Disable the module
-            for i = 1:2
+            for ch = obj.channels
                 [status, ~] = calllib('libbladeRF', 'bladerf_enable_module', ...
                                       obj.bladerf.device, ...
-                                      obj.current_channel{i}, ...
+                                      bladeRF.str2ch(ch), ...
                                       false);
 
                 bladeRF.check_status('bladerf_enable_module', status);
