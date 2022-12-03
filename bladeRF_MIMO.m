@@ -242,6 +242,12 @@ classdef bladeRF_MIMO < handle
         %   'BLADERF_CHANNEL_TX1'
         %   'BLADERF_CHANNEL_TX2'
         %
+        % Options for channel layouts are:
+        %   'BLADERF_RX_X1' 
+        %   'BLADERF_TX_X1'
+        %   'BLADERF_RX_X2'
+        %   'BLADERF_TX_X2'
+        %
             str = upper(str);
 
             switch str
@@ -256,6 +262,14 @@ classdef bladeRF_MIMO < handle
                 case 'BLADERF_CHANNEL_TX1'
                     int32 = 1;
                 case 'BLADERF_CHANNEL_TX2'
+                    int32 = 3;
+                case 'BLADERF_RX_X1'
+                    int32 = 0;
+                case 'BLADERF_TX_X1'
+                    int32 = 1;
+                case 'BLADERF_RX_X2'
+                    int32 = 2;
+                case 'BLADERF_TX_X2'
                     int32 = 3;
                 otherwise
                     error('Invalid channel string: "%s"', str);
